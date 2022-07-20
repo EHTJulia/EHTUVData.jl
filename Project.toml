@@ -1,0 +1,13 @@
+name = "EHTUVData"
+uuid = "56783127-7e15-4e7d-9691-d34b50bc826a"
+authors = ["Kazu Akiyama"]
+version = "0.1.0"
+
+[compat]
+julia = "1.7.2"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
