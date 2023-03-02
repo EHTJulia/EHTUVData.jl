@@ -17,8 +17,9 @@ UnitfulAngles = "6fb2a4bd-7999-5318-a3b2-8ad61056cd98"
 UnitfulAstro = "6112ee07-acf9-5e0f-b108-d242c714bf9f"
 
 [compat]
-DimensionalData = "0.24"
+Conda = "1"
 DataFrames = "1"
+DimensionalData = "0.24"
 EHTUtils = "0.1"
 OrderedCollections = "1"
 Unitful = "1"
