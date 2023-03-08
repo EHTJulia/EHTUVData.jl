@@ -20,6 +20,7 @@ const uvdataset_metadata_default = (
     radecunit="rad"
 )
 
+
 # Quick short cuts
 Base.keys(uvd::UVDataSet) = keys(uvd.datasets)
 Base.getindex(uvd::UVDataSet, key::Symbol) = getindex(uvd.datasets, key)
@@ -36,6 +37,7 @@ function Base.copy(uvd::UVDataSet)
         copy(metadata)
     )
 end
+
 
 # compute frequency
 """
@@ -59,6 +61,7 @@ function compute_ν(ds::DimStack)
     return outds
 end
 
+
 """
     compute_ν!(uvdata::UVDataSet, datakeys=nothing)
 
@@ -72,7 +75,7 @@ function compute_ν!(uvdata::UVDataSet, datakeys=nothing)
         updatekeys = datakeys
     end
 
-    availables = [:visibility]
+    availables = [:baseline]
     for key in updatekeys
         if key ∈ availables
             uvdata[key] = compute_ν(uvdata[key])
@@ -130,13 +133,13 @@ end
 """
     compute_uvw!(uvdata::UVDataSet)
 
-Recalculate uvw coordinates of the `:visibility` data set
+Recalculate uvw coordinates of the `:baseline` data set
 using `:usec`, `:vsec`, `:wsec`, `:ν` fields. 
 For instance, u is given by usec * ν.
 """
 function compute_uvw!(uvdata::UVDataSet)
-    if :visibility ∈ keys(uvdata)
-        uvdata[:visibility] = compute_uvw(uvdata[:visibility])
+    if :baseline ∈ keys(uvdata)
+        uvdata[:baseline] = compute_uvw(uvdata[:baseline])
     end
 
     return
@@ -146,7 +149,7 @@ end
 """
     compute_uvw(uvdata::UVDataSet)
 
-Recalculate uvw coordinates of the `:visibility` data set
+Recalculate uvw coordinates of the `:baseline` data set
 using `:usec`, `:vsec`, `:wsec`, `:ν` fields. 
 For instance, u is given by usec * ν.
 """

@@ -17,11 +17,11 @@ function load_uvfits(filename::AbstractString)::UVDataSet
     # Load GroupHDU, HDUs for AIPS AN/FQ Tables
     ghdu, antab, fqtab = hdulist2hdus(hdulist)
 
-    # Get the visibility data set from GroupHDU
-    visds = hdulist2vis(ghdu)
+    # Get the baseline-based UV data set (i.e. visibility) from GroupHDU
+    blds = hdulist2bl(ghdu)
 
     # Get the frequency information
-    visds = concat(visds, hdulist2freq(ghdu, antab, fqtab))
+    blds = concat(blds, hdulist2freq(ghdu, antab, fqtab))
 
     # Get the antds
     antds = hdulist2ant(antab)
@@ -30,7 +30,7 @@ function load_uvfits(filename::AbstractString)::UVDataSet
     metadata = hdulist2metadata(ghdu, antab)
 
     # group visds and antds in OrderedDict
-    datasets = OrderedDict(:visibility => visds, :antenna => antds)
+    datasets = OrderedDict(:antenna => antds, :baseline => blds)
 
     # Form UVData
     uvdata = UVDataSet(datasets, metadata)
@@ -84,7 +84,7 @@ function hdulist2hdus(hdulist)
     return ghdu, antab, fqtab
 end
 
-function hdulist2vis(ghdu)
+function hdulist2bl(ghdu)
     # size of visibility data
     ndata, ndec, nra, nspw, nch, npol, _ = size(ghdu.data.data)
 
@@ -199,7 +199,7 @@ function hdulist2vis(ghdu)
     ipref = Int64(ghdu.header.get("CRPIX3"))
     pref = Int64(ghdu.header.get("CRVAL3"))
     polids = (dp*(1-ipref)+pref):dp:(dp*(npol-ipref)+pref)
-    pol = [polid2name[string(polid)] for polid in polids]
+    pol = [uvfits_polid2name[string(polid)] for polid in polids]
 
     # form dimensional arrays
     c = Dim{:ch}(collect(1:nch))
@@ -208,7 +208,7 @@ function hdulist2vis(ghdu)
     p = Dim{:pol}(collect(1:npol))
 
     # ch, spw, data (time x baseline), pol
-    visds = DimStack(
+    blds = DimStack(
         DimArray(data=Vcmp, dims=(c, s, d, p), name=:visibility),
         DimArray(data=σV, dims=(c, s, d, p), name=:sigma),
         DimArray(data=σV, dims=(c, s, d, p), name=:flag),
@@ -222,7 +222,7 @@ function hdulist2vis(ghdu)
         DimArray(data=pardata[!, :antid2], dims=(d), name=:antid2),
     )
 
-    return visds
+    return blds
 end
 
 """
@@ -389,18 +389,3 @@ function hdulist2metadata(ghdu, antab)
 
     return metadata
 end
-
-polid2name = Dict(
-    "+1" => "I",
-    "+2" => "Q",
-    "+3" => "U",
-    "+4" => "V",
-    "-1" => "RR",
-    "-2" => "LL",
-    "-3" => "RL",
-    "-4" => "LR",
-    "-5" => "XX",
-    "-6" => "YY",
-    "-7" => "XY",
-    "-8" => "YX",
-)

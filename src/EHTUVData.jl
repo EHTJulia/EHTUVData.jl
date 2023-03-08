@@ -5,6 +5,8 @@ using Conda
 using DataFrames
 using DimensionalData
 using EHTUtils
+using FLoops
+using Formatting
 using OrderedCollections
 using PyCall
 using Statistics
@@ -20,7 +22,9 @@ include("abstractuvdataset/abstract.jl")
 # UVDataSet
 include("uvdataset/abstract.jl")
 include("uvdataset/utils.jl")
+include("uvdataset/io/uvfitsutils.jl")
 include("uvdataset/io/uvfitsloader.jl")
+include("uvdataset/io/uvfitswriter.jl")
 
 # UVDiskDataSet
 end
