@@ -1,7 +1,7 @@
 name = "EHTUVData"
 uuid = "56783127-7e15-4e7d-9691-d34b50bc826a"
 authors = ["Kazu Akiyama"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 Conda = "8f4d0f93-b110-5947-807f-2305c1781a2d"
