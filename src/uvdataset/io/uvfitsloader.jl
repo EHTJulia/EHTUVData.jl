@@ -1,5 +1,6 @@
 export load_uvfits
 
+
 """
     load_uvfits(filename::AbstractString)::UVDataSet
 
@@ -7,7 +8,7 @@ load visibility data from the given uvfits file.
 Data will be loaded through astropy.io.fits module
 loaded by PyCall.
 """
-function load_uvfits(filename::AbstractString)::UVDataSet
+function load_uvfits(filename::AbstractString; ex=ThreadedEx())::UVDataSet
     # Load pyfits
     copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
 
@@ -18,7 +19,7 @@ function load_uvfits(filename::AbstractString)::UVDataSet
     ghdu, antab, fqtab = hdulist2hdus(hdulist)
 
     # Get the baseline-based UV data set (i.e. visibility) from GroupHDU
-    blds = hdulist2bl(ghdu)
+    blds = hdulist2bl(ghdu, ex=ex)
 
     # Get the frequency information
     blds = concat(blds, hdulist2freq(ghdu, antab, fqtab))
@@ -42,6 +43,7 @@ function load_uvfits(filename::AbstractString)::UVDataSet
     # output
     return uvdata
 end
+
 
 """
     hdulist2hdus(hdulist)
@@ -84,7 +86,11 @@ function hdulist2hdus(hdulist)
     return ghdu, antab, fqtab
 end
 
-function hdulist2bl(ghdu)
+
+"""
+    hdulist2bl(ghdu; ex=ThreadedEx())
+"""
+function hdulist2bl(ghdu; ex=ThreadedEx())
     # size of visibility data
     ndata, ndec, nra, nspw, nch, npol, _ = size(ghdu.data.data)
 
@@ -183,7 +189,7 @@ function hdulist2bl(ghdu)
     subarray = zeros(Int64, ndata)
     pardata[!, :antid1] = zeros(Int64, ndata)
     pardata[!, :antid2] = zeros(Int64, ndata)
-    for i in 1:ndata
+    @floop ex for i in 1:ndata
         subid, blid = modf(pardata[i, :baseline])
         subarray[i] = Int64(100 * subid + 1)
         pardata[i, :antid1] = div(blid, 256)
@@ -211,7 +217,7 @@ function hdulist2bl(ghdu)
     blds = DimStack(
         DimArray(data=Vcmp, dims=(c, s, d, p), name=:visibility),
         DimArray(data=σV, dims=(c, s, d, p), name=:sigma),
-        DimArray(data=σV, dims=(c, s, d, p), name=:flag),
+        DimArray(data=flag, dims=(c, s, d, p), name=:flag),
         DimArray(data=pol, dims=(p), name=:polarization),
         DimArray(data=pardata[!, :usec], dims=(d), name=:usec),
         DimArray(data=pardata[!, :vsec], dims=(d), name=:vsec),

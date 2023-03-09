@@ -1,6 +1,7 @@
 export save_uvfits!
 
-function save_uvfits!(uvd::UVDataSet, filename::AbstractString; ex=SequentialEx())
+
+function save_uvfits!(uvd::UVDataSet, filename::AbstractString; ex=ThreadedEx())
     # open hdulist
     hdulist = [
         uvdataset2ghdu(uvd, ex=ex),
@@ -20,7 +21,7 @@ function save_uvfits!(uvd::UVDataSet, filename::AbstractString; ex=SequentialEx(
 end
 
 
-function uvdataset2ghdu(uvd::UVDataSet; ex=SequentialEx())
+function uvdataset2ghdu(uvd::UVDataSet; ex=ThreadedEx())
     # load pyfits
     copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
 
@@ -184,178 +185,7 @@ function uvdataset2ghdu(uvd::UVDataSet; ex=SequentialEx())
 end
 
 
-function uvdataset2ghdu_back(uvd::UVDataSet; ex=SequentialEx())
-    # load pyfits
-    copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
-
-    # shortcut to each data set
-    blds = uvd[:baseline]
-
-    # get data size
-    nch, nspw, ndata, npol = size(blds)
-
-    # Time: jdref, mjdmin, mjd1, mjd2
-    #    the first mjd
-    mjdmin = floor(minimum(blds[:mjd].data))
-    #    the reference date (for some reason Jan 1st of the observing year)
-    jdref = datetime2julian(
-        DateTime(
-            Dates.Year(mjd2datetime(mjdmin)),
-            Dates.Month(1),
-            Dates.Day(1)
-        )
-    )
-    mjdref = jd2mjd(jdref)
-    Δmjd1 = zeros(ndata)
-    Δmjd2 = zeros(ndata)
-    @floop ex for i = 1:ndata
-        Δmjd2[i], Δmjd1[i] = modf(blds[:mjd].data[i] - mjdref)
-    end
-
-    # Frequency
-    Δνch = blds[:Δνch].data[1]
-    νref = minimum(blds[:ν].data)
-
-    # Source Parameters
-    obsra = rad2deg(uvd.metadata[:ra])
-    obsdec = rad2deg(uvd.metadata[:dec])
-
-    # uvfits dimension ndata, ndec, nra, nspw, nch, npol, 3
-    # uvdata dimension nch, nspw, ndata, npol
-
-    # Visibility Data
-    visarr = zeros(Float32, ndata, 1, 1, nspw, nch, npol, 3)
-    @floop ex for ipol = 1:npol, idata = 1:ndata, ispw = 1:nspw, ich = 1:nch
-        # get flag and uncertainty
-        flag = blds[:flag].data[ich, ispw, idata, ipol]
-        sigma = blds[:sigma].data[ich, ispw, idata, ipol]
-
-        if sigma == 0 || isinf(sigma) == true || flag == 0
-            continue
-        end
-
-        vcmp = blds[:visibility].data[ich, ispw, idata, ipol]
-        visarr[idata, 1, 1, ispw, ich, ipol, 1] = real(vcmp)
-        visarr[idata, 1, 1, ispw, ich, ipol, 2] = imag(vcmp)
-
-        weight = 1 / sigma^2
-
-        if flag > 0
-            visarr[idata, 1, 1, ispw, ich, ipol, 3] = weight
-        else
-            visarr[idata, 1, 1, ispw, ich, ipol, 3] = -weight
-        end
-    end
-
-    # create group HDU
-    ghdu = pyfits.GroupsHDU(
-        pyfits.GroupData(
-            input=visarr,
-            parnames=[
-                "UU---SIN",
-                "VV---SIN",
-                "WW---SIN",
-                "BASELINE",
-                "DATE",
-                "DATE",
-                "INTTIM"
-            ],
-            pardata=[
-                Float32.(blds[:usec].data),
-                Float32.(blds[:vsec].data),
-                Float32.(blds[:wsec].data),
-                Float32.(blds[:antid1].data .* 256 .+ blds[:antid2].data),
-                Δmjd1,
-                Δmjd2,
-                Float32.(blds[:Δmjd].data .* 86400)
-            ],
-            bscale=1.0,
-            bzero=0.0,
-            bitpix=-32
-        )
-    )
-
-    # PTYPE Header Cards
-    ghdu.header.set("PZERO5", jdref - 0.5, "")
-    ghdu.header.set("PSCAL5", 1.0, "")
-    ghdu.header.set("PZERO6", 0.5, "")
-    ghdu.header.set("PSCAL6", 1.0, "")
-
-    # CTYPE Header Cards
-    #   Complex
-    ghdu.header.set("CTYPE2", "COMPLEX", "real, imaginary, weight")
-    ghdu.header.set("CRPIX2", 1.0, "")
-    ghdu.header.set("CRVAL2", 1.0, "")
-    ghdu.header.set("CDELT2", 1.0, "")
-    ghdu.header.set("CROTA2", 0.0, "")
-    #   Polarizaiton
-    firstpol = uvfits_polname2id[blds[:polarization].data[1]]
-    ghdu.header.set("CTYPE3", "STOKES", "stokes parameter")
-    ghdu.header.set("CRPIX3", 1.0, "")
-    ghdu.header.set("CRVAL3", float(firstpol), "")
-    ghdu.header.set("CDELT3", float(sign(firstpol)), "")
-    ghdu.header.set("CROTA3", 0.0, "")
-    #   FREQ
-    ghdu.header.set("CTYPE4", "FREQ", "frequency (spectral channel) in Hz")
-    ghdu.header.set("CRPIX4", 1.0, "")
-    ghdu.header.set("CRVAL4", νref, "")
-    ghdu.header.set("CDELT4", blds[:Δνch].data[1], "")
-    ghdu.header.set("CROTA4", 0.0, "")
-    #   IF
-    ghdu.header.set("CTYPE5", "IF", "spectral window number")
-    ghdu.header.set("CRPIX5", 1.0, "")
-    ghdu.header.set("CRVAL5", 1.0, "")
-    ghdu.header.set("CDELT5", 1.0, "")
-    ghdu.header.set("CROTA5", 0.0, "")
-    #   RA
-    ghdu.header.set("CTYPE6", "RA", "right ascention of the phase center in degree")
-    ghdu.header.set("CRPIX6", 1.0, "")
-    ghdu.header.set("CRVAL6", obsra, "")
-    ghdu.header.set("CDELT6", 1.0, "")
-    ghdu.header.set("CROTA6", 0.0, "")
-    #   DEC
-    ghdu.header.set("CTYPE7", "DEC", "declination of the phase center in degree")
-    ghdu.header.set("CRPIX7", 1.0, "")
-    ghdu.header.set("CRVAL7", obsdec, "")
-    ghdu.header.set("CDELT7", 1.0, "")
-    ghdu.header.set("CROTA7", 0.0, "")
-
-    # Other entries
-    #   Time Stamp
-    ghdu.header.set("MJD", mjdmin, "")
-    ghdu.header.set("DATE-OBS", Dates.format(mjd2datetime(mjdmin), DateFormat("yyyy-mm-dd")), "observational date")
-    #   Observation Info
-    ghdu.header.set("TELESCOP", uvd.metadata[:instrument], "telescope name")
-    ghdu.header.set("INSTRUME", uvd.metadata[:instrument], "instrument name")
-    ghdu.header.set("OBSERVER", uvd.metadata[:observer], "observer name")
-    ghdu.header.set("OBJECT", uvd.metadata[:source], "source name")
-    #   Target Coordinates
-    ghdu.header.set("OBSRA", obsra, "phase center: right ascention in degree")
-    ghdu.header.set("OBSDEC", obsdec, "phase center: declination in degree")
-    ghdu.header.set("EQUINOX", uvd.metadata[:equinox], "equinox of source coordinates")
-    #   Frequency related metadata
-    ghdu.header.set("VELREF", 3, ">256 radio, 1 lsr, 2 hel, 3 obs")
-    ghdu.header.set("ALTRVAL", 0.0, "altenate FREQ/VEL ref value")
-    ghdu.header.set("ALTRPIX", 1.0, "altenate FREQ/VEL ref pixel")
-    ghdu.header.set("RESTFREQ", νref, "rest frequency in Hz")
-    #   Scaling of visbility products
-    ghdu.header.set("BSCALE", 1.0, "real = tape * bscale + bzero")
-    ghdu.header.set("BZERO", 0.0, "")
-    ghdu.header.set("BUNIT", "JY", "unit of flux")
-
-    # Add comments to the exsiting block
-    #   Parameter Type
-    ghdu.header.set("NAXIS1", nothing, "no stand image just group")
-    ghdu.header.set("PTYPE1", nothing, "u baseline coordinates in seconds")
-    ghdu.header.set("PTYPE2", nothing, "v baseline coordinates in seconds")
-    ghdu.header.set("PTYPE3", nothing, "w baseline coordinates in seconds")
-    ghdu.header.set("PTYPE4", nothing, "julian date 1")
-    ghdu.header.set("PTYPE5", nothing, "julian date 2")
-    ghdu.header.set("PTYPE6", nothing, "integration time in seconds")
-    return ghdu
-end
-
-function uvdataset2antab(uvd::UVDataSet; ex=SequentialEx())
+function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
     # load pyfits
     copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
     copy!(numpy, pyimport_conda("numpy", "numpy"))
@@ -501,7 +331,7 @@ function uvdataset2antab(uvd::UVDataSet; ex=SequentialEx())
 end
 
 
-function uvdataset2fqtab(uvd::UVDataSet; ex=SequentialEx())
+function uvdataset2fqtab(uvd::UVDataSet; ex=ThreadedEx())
     # load pyfits
     copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
     copy!(numpy, pyimport_conda("numpy", "numpy"))
