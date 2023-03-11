@@ -2,28 +2,31 @@ export save_uvfits!
 
 
 function save_uvfits!(uvd::UVDataSet, filename::AbstractString; ex=ThreadedEx())
-    # open hdulist
-    hdulist = [
+    pf = pyimport("astropy.io.fits")
+
+    # create hdulist
+    hdulist = pf.HDUList(PyList([
         uvdataset2ghdu(uvd, ex=ex),
         uvdataset2antab(uvd, ex=ex),
         uvdataset2fqtab(uvd, ex=ex),
-    ]
+    ]))
 
-    py"""
-    import astropy.io.fits as pf
-
-    def writeto(filename, hdulist, overwrite):
-        pf.HDUList(hdulist).writeto(filename, overwrite=overwrite)
-    """
-    py"writeto"(filename, hdulist, overwrite=true)
+    # save to uvfits file
+    hdulist.writeto(filename, overwrite=true)
 
     return
 end
 
 
 function uvdataset2ghdu(uvd::UVDataSet; ex=ThreadedEx())
-    # load pyfits
-    copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
+    # load python modules
+    pf = pyimport("astropy.io.fits")
+    np = pyimport("numpy")
+
+    # useful shortcuts
+    float32array(x::AbstractArray) = np.asarray(x, dtype=np.float32)
+    float64array(x::AbstractArray) = np.asarray(x, dtype=np.float64)
+    anyarray(x::AbstractArray) = np.asarray(x)
 
     # shortcut to each data set
     blds = uvd[:baseline]
@@ -77,10 +80,10 @@ function uvdataset2ghdu(uvd::UVDataSet; ex=ThreadedEx())
     end
 
     # create group HDU
-    ghdu = pyfits.GroupsHDU(
-        pyfits.GroupData(
-            input=visarr,
-            parnames=[
+    ghdu = pf.GroupsHDU(
+        pf.GroupData(
+            input=float32array(visarr),
+            parnames=PyList([
                 "UU---SIN",
                 "VV---SIN",
                 "WW---SIN",
@@ -88,16 +91,16 @@ function uvdataset2ghdu(uvd::UVDataSet; ex=ThreadedEx())
                 "DATE",
                 "DATE",
                 "INTTIM"
-            ],
-            pardata=[
-                Float32.(blds[:usec].data),
-                Float32.(blds[:vsec].data),
-                Float32.(blds[:wsec].data),
-                Float32.(blds[:antid1].data .* 256 .+ blds[:antid2].data),
-                mjd2jd(Δmjd1),
-                Δmjd2,
-                Float32.(blds[:Δmjd].data .* 86400)
-            ],
+            ]),
+            pardata=PyList([
+                float32array(blds[:usec].data),
+                float32array(blds[:vsec].data),
+                float32array(blds[:wsec].data),
+                float32array(blds[:antid1].data .* 256 .+ blds[:antid2].data),
+                float64array(mjd2jd(Δmjd1)),
+                float64array(Δmjd2),
+                float32array(blds[:Δmjd].data .* 86400)
+            ]),
             bscale=1.0,
             bzero=0.0,
             bitpix=-32
@@ -106,8 +109,8 @@ function uvdataset2ghdu(uvd::UVDataSet; ex=ThreadedEx())
 
     # PTYPE Header Cards
     for i in 1:7
-        ghdu.header.set(format("PZERO{}", i), 0.0, "")
-        ghdu.header.set(format("PSCAL{}", i), 1.0, "")
+        ghdu.header.set(format("PZERO{}", i), 0.0, "", after=format("PTYPE{}", i))
+        ghdu.header.set(format("PSCAL{}", i), 1.0, "", after=format("PZERO{}", i))
     end
 
     # CTYPE Header Cards
@@ -186,9 +189,14 @@ end
 
 
 function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
-    # load pyfits
-    copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
-    copy!(numpy, pyimport_conda("numpy", "numpy"))
+    # load python modules
+    pf = pyimport("astropy.io.fits")
+    np = pyimport("numpy")
+
+    # useful shortcuts
+    float32array(x::AbstractArray) = np.asarray(x, dtype=np.float32)
+    float64array(x::AbstractArray) = np.asarray(x, dtype=np.float64)
+    int32array(x::AbstractArray) = np.asarray(x, dtype=np.int32)
 
     # quick shortcuts to data set
     antds = uvd[:antenna]
@@ -197,32 +205,31 @@ function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
     # get data size
     nch, nspw, ndata, npol = size(blds)
     nant = length(antds[:x])
-    nfeed = length(antds[:feed])
 
     # Columns
     #   ANNAME
-    c1 = pyfits.Column(
+    c1 = pf.Column(
         name="ANNAME", format="8A", unit=" ",
-        array=numpy.asarray(uvd[:antenna][:name].data, dtype="|S8")
+        array=np.asarray(uvd[:antenna][:name].data, dtype="|S8")
     )
     #   STABXYZ
     stabxyz = zeros(Float64, nant, 3)
     stabxyz[:, 1] = antds[:x]
     stabxyz[:, 2] = antds[:y]
     stabxyz[:, 3] = antds[:z]
-    c2 = pyfits.Column(
+    c2 = pf.Column(
         name="STABXYZ", format="3D", unit="METERS",
-        array=stabxyz
+        array=float64array(stabxyz)
     )
     #   ORBPARM
-    c3 = pyfits.Column(
+    c3 = pf.Column(
         name="ORBPARM", format="1D", unit=" ",
-        array=zeros(Float64, nant)
+        array=np.zeros(nant, dtype=np.float64)
     )
     #   NOSTA
-    c4 = pyfits.Column(
+    c4 = pf.Column(
         name="NOSTA", format="1J", unit=" ",
-        array=Int32.(1:nant)
+        array=np.zeros(nant, dtype=np.int32)
     )
     #   MNTSTA
     mntsta = zeros(Int32, nant)
@@ -244,49 +251,49 @@ function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
             @warn "Feed Rotation Offset Angle is not zerofor Antenna ", i, ". This will be ignored."
         end
     end
-    c5 = pyfits.Column(
+    c5 = pf.Column(
         name="MNTSTA", format="1J", unit=" ",
-        array=mntsta
+        array=int32array(mntsta)
     )
     #   STAXOF
-    c6 = pyfits.Column(
+    c6 = pf.Column(
         name="STAXOF", format="1E", unit="METERS",
-        array=zeros(Float32, nant)
+        array=np.zeros(nant, dtype=np.float32)
     )
     #   POLTYA
-    c7 = pyfits.Column(
+    c7 = pf.Column(
         name="POLTYA", format="1A", unit="",
-        array=fill(antds[:feed].data[1], nant)
+        array=np.asarray(antds[:feed1], dtype="|S1")
     )
     #   POLTYA
-    c8 = pyfits.Column(
+    c8 = pf.Column(
         name="POLAA", format="1E", unit="DEGREES",
-        array=zeros(Float32, nant)
+        array=np.zeros(nant, dtype=np.float32)
     )
     #   POLTYA
-    c9 = pyfits.Column(
+    c9 = pf.Column(
         name="POLCALA", format="1E", unit=" ",
-        array=zeros(Float32, nant)
+        array=np.zeros(nant, dtype=np.float32)
     )
     #   POLTYA
-    c10 = pyfits.Column(
+    c10 = pf.Column(
         name="POLTYB", format="1A", unit=" ",
-        array=fill(antds[:feed].data[2], nant)
+        array=np.asarray(antds[:feed2], dtype="|S1")
     )
     #   POLTYA
-    c11 = pyfits.Column(
+    c11 = pf.Column(
         name="POLAB", format="1E", unit="DEGREES",
-        array=zeros(Float32, nant)
+        array=np.zeros(nant, dtype=np.float32)
     )
     #   POLTYA
-    c12 = pyfits.Column(
+    c12 = pf.Column(
         name="POLCALB", format="1E", unit=" ",
-        array=zeros(Float32, nant)
+        array=np.zeros(nant, dtype=np.float32)
     )
 
     # Make HDU
-    hdu = pyfits.BinTableHDU.from_columns(
-        pyfits.ColDefs([c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12])
+    hdu = pf.BinTableHDU.from_columns(
+        pf.ColDefs(PyList([c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12]))
     )
 
     # Add Headers
@@ -332,9 +339,14 @@ end
 
 
 function uvdataset2fqtab(uvd::UVDataSet; ex=ThreadedEx())
-    # load pyfits
-    copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
-    copy!(numpy, pyimport_conda("numpy", "numpy"))
+    # load python modules
+    pf = pyimport("astropy.io.fits")
+    np = pyimport("numpy")
+
+    # useful shortcuts
+    float32array(x::AbstractArray) = np.asarray(x, dtype=np.float32)
+    float64array(x::AbstractArray) = np.asarray(x, dtype=np.float64)
+    int32array(x::AbstractArray) = np.asarray(x, dtype=np.int32)
 
     # quick shortcuts to datasets
     blds = uvd[:baseline]
@@ -343,28 +355,28 @@ function uvdataset2fqtab(uvd::UVDataSet; ex=ThreadedEx())
     nch, nspw, _, _ = size(blds)
 
     # columns
-    c1 = pyfits.Column(
+    c1 = pf.Column(
         name="FRQSEL", format="1J", unit=" ",
-        array=Int32.([1])
+        array=int32array([1])
     )
-    c2 = pyfits.Column(
+    c2 = pf.Column(
         name="IF FREQ", format=format("{}D", nspw), unit="HZ",
-        array=Float64.(reshape(blds[:νspw].data, 1, nspw) .- minimum(blds[:ν]))
+        array=float64array(reshape(blds[:νspw].data, 1, nspw) .- minimum(blds[:ν]))
     )
-    c3 = pyfits.Column(
+    c3 = pf.Column(
         name="CH WIDTH", format=format("{}E", nspw), unit="HZ",
-        array=Float32.(reshape(blds[:Δνch].data, 1, nspw))
+        array=float32array(reshape(blds[:Δνch].data, 1, nspw))
     )
-    c4 = pyfits.Column(
+    c4 = pf.Column(
         name="TOTAL BANDWIDTH", format=format("{}E", nspw), unit="HZ",
-        array=Float32.(reshape(blds[:Δνch].data, 1, nspw))
+        array=float32array(reshape(blds[:Δνch].data, 1, nspw))
     )
-    c5 = pyfits.Column(
+    c5 = pf.Column(
         name="SIDEBAND", format=format("{}J", nspw), unit=" ",
-        array=Int32.(reshape(blds[:sideband].data, 1, nspw))
+        array=int32array(reshape(blds[:sideband].data, 1, nspw))
     )
-    hdu = pyfits.BinTableHDU.from_columns(
-        pyfits.ColDefs([c1, c2, c3, c4, c5])
+    hdu = pf.BinTableHDU.from_columns(
+        pf.ColDefs(PyList([c1, c2, c3, c4, c5]))
     )
 
     # header for columns

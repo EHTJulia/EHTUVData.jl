@@ -10,10 +10,10 @@ loaded by PyCall.
 """
 function load_uvfits(filename::AbstractString; ex=ThreadedEx())::UVDataSet
     # Load pyfits
-    copy!(pyfits, pyimport_conda("astropy.io.fits", "astropy"))
+    pf = pyimport("astropy.io.fits")
 
     # Open UVFITS file
-    hdulist = pyfits.open(filename)
+    hdulist = pf.open(filename)
 
     # Load GroupHDU, HDUs for AIPS AN/FQ Tables
     ghdu, antab, fqtab = hdulist2hdus(hdulist)
@@ -29,6 +29,9 @@ function load_uvfits(filename::AbstractString; ex=ThreadedEx())::UVDataSet
 
     # Get the metadata
     metadata = hdulist2metadata(ghdu, antab)
+
+    # close HDUList
+    hdulist.close()
 
     # group visds and antds in OrderedDict
     datasets = OrderedDict(:antenna => antds, :baseline => blds)
@@ -48,7 +51,7 @@ end
 """
     hdulist2hdus(hdulist)
 
-Read the given hdulist (output of pyfits.io.open) and return
+Read the given hdulist (output of pf.io.open) and return
 GroupHDU and HDUs of AIPS AN/FQ Tables.
 """
 function hdulist2hdus(hdulist)
@@ -56,30 +59,31 @@ function hdulist2hdus(hdulist)
     nhdu = length(hdulist)
 
     # grouphdu
-    ghdu = hdulist[1]
+    ghdu = hdulist[0]
 
     # read other hdu
     antab = NaN
     fqtab = NaN
-    for hdu in hdulist[2:nhdu]
-        if hdu.header.get("EXTNAME") == "AIPS AN"
-            if typeof(antab) == PyObject
+    for i in 1:(nhdu-1)
+        hdu = hdulist[i]
+        if string(hdu.header.get("EXTNAME")) == "AIPS AN"
+            if typeof(antab) == Py
                 println("Warning: there are multiple AN tables in the UVFITS file. The latest one will be loaded.")
             end
             antab = hdu
-        elseif hdu.header.get("EXTNAME") == "AIPS FQ"
-            if typeof(fqtab) == PyObject
+        elseif string(hdu.header.get("EXTNAME")) == "AIPS FQ"
+            if typeof(fqtab) == Py
                 println("Warning: there are multiple FQ tables in the UVFITS file. The latest one will be loaded.")
             end
             fqtab = hdu
         end
     end
 
-    if typeof(antab) != PyObject
+    if typeof(antab) != Py
         @throwerror ValueError "The input UVFITS file does not have an AIPS FQ Table."
     end
 
-    if typeof(fqtab) != PyObject
+    if typeof(fqtab) != Py
         @throwerror ValueError "The input UVFITS file does not have an AIPS FQ Table."
     end
 
@@ -91,17 +95,28 @@ end
     hdulist2bl(ghdu; ex=ThreadedEx())
 """
 function hdulist2bl(ghdu; ex=ThreadedEx())
+    # import numpy
+    np = pyimport("numpy")
+
+    # define useful shortcuts
+    float64vector(x::Py) = pyconvert(Vector, np.asarray(x, dtype=np.float64))
+    int32vector(x::Py) = pyconvert(Vector, np.asarray(x, dtype=np.int32))
+    float32array(x::Py) = pyconvert(Array, np.asarray(x, dtype=np.int32))
+
+    # group hdu
+    ghdudata = float32array(ghdu.data.data)
+
     # size of visibility data
-    ndata, ndec, nra, nspw, nch, npol, _ = size(ghdu.data.data)
+    ndata, ndec, nra, nspw, nch, npol, _ = size(ghdudata)
 
     if (ndec > 1) || (nra > 1)
         print("Warning: GroupHDU has more than a single coordinae (Nra, Ndec) = (", nra, ", ", ndec, "). We will pick up only the first one.")
     end
 
     # read visibilities
-    Vre = ghdu.data.data[:, 1, 1, :, :, :, 1] # Dim: data (time x baseline), spw, ch, pol 
-    Vim = ghdu.data.data[:, 1, 1, :, :, :, 2]
-    Vwe = ghdu.data.data[:, 1, 1, :, :, :, 3]
+    Vre = ghdudata[:, 1, 1, :, :, :, 1] # Dim: data (time x baseline), spw, ch, pol 
+    Vim = ghdudata[:, 1, 1, :, :, :, 2]
+    Vwe = ghdudata[:, 1, 1, :, :, :, 3]
 
     # permutate dimensions
     Vre = permutedims(Vre, (3, 2, 1, 4)) # Dim: ch, spw, data (time x baseline), pol
@@ -125,39 +140,39 @@ function hdulist2bl(ghdu; ex=ThreadedEx())
     npar = length(parnames)
     pardata = DataFrame()
     for ipar in 1:npar
-        parname = parnames[ipar]
+        parname = string(parnames[ipar-1])
         if occursin("UU", parname)
             paridxes[1] = ipar
-            pardata[!, :usec] = Float64.(ghdu.data.par(ipar - 1))
+            pardata[!, :usec] = float64vector(ghdu.data.par(ipar - 1))
         elseif occursin("VV", parname)
             paridxes[2] = ipar
-            pardata[!, :vsec] = Float64.(ghdu.data.par(ipar - 1))
+            pardata[!, :vsec] = float64vector(ghdu.data.par(ipar - 1))
         elseif occursin("WW", parname)
             paridxes[3] = ipar
-            pardata[!, :wsec] = Float64.(ghdu.data.par(ipar - 1))
+            pardata[!, :wsec] = float64vector(ghdu.data.par(ipar - 1))
         elseif occursin("DATE", parname)
             if paridxes[4] < 0
                 paridxes[4] = ipar
-                pardata[!, :mjd] = jd2mjd(Float64.(ghdu.data.par(ipar - 1)))
+                pardata[!, :mjd] = jd2mjd(float64vector(ghdu.data.par(ipar - 1)))
             elseif paridxes[5] < 0
                 paridxes[5] = ipar
-                pardata[!, :mjd] .+= Float64.(ghdu.data.par(ipar - 1))
+                pardata[!, :mjd] .+= float64vector(ghdu.data.par(ipar - 1))
             else
                 println(ipar)
                 @throwerror KeyError "Random Parameter have too many `DATE` columns."
             end
         elseif occursin("BASELINE", parname)
             paridxes[6] = ipar
-            pardata[!, :baseline] = Float64.(ghdu.data.par(ipar - 1))
+            pardata[!, :baseline] = float64vector(ghdu.data.par(ipar - 1))
         elseif occursin("SOURCE", parname)
             paridxes[7] = ipar
-            pardata[!, :source] = Int32.(ghdu.data.par(ipar - 1))
+            pardata[!, :source] = int32vector(ghdu.data.par(ipar - 1))
         elseif occursin("INTTIM", parname)
             paridxes[8] = ipar
-            pardata[!, :inttime] = Float64.(ghdu.data.par(ipar - 1))
+            pardata[!, :inttime] = float64vector(ghdu.data.par(ipar - 1))
         elseif occursin("FREQSEL", parname)
             paridxes[9] = ipar
-            pardata[!, :freqset] = Int32.(ghdu.data.par(ipar - 1))
+            pardata[!, :freqset] = int32vector(ghdu.data.par(ipar - 1))
         end
     end
 
@@ -201,9 +216,9 @@ function hdulist2bl(ghdu; ex=ThreadedEx())
     end
 
     # polarization
-    dp = Int64(ghdu.header.get("CDELT3"))
-    ipref = Int64(ghdu.header.get("CRPIX3"))
-    pref = Int64(ghdu.header.get("CRVAL3"))
+    dp = pyconvert(Int64, ghdu.header.get("CDELT3"))
+    ipref = pyconvert(Int64, ghdu.header.get("CRPIX3"))
+    pref = pyconvert(Int64, ghdu.header.get("CRVAL3"))
     polids = (dp*(1-ipref)+pref):dp:(dp*(npol-ipref)+pref)
     pol = [uvfits_polid2name[string(polid)] for polid in polids]
 
@@ -235,14 +250,17 @@ end
     hdulist2freq(ghdu, antab, fqtab)
 """
 function hdulist2freq(ghdu, antab, fqtab)
-    # Load numpy
-    copy!(numpy, pyimport_conda("numpy", "numpy"))
+    # pyimport
+    np = pyimport("numpy")
+
+    # define useful shortcuts
+    vector(x::Py) = pyconvert(Vector, x)
 
     # Reference Frequency
-    reffreq = antab.header.get("FREQ")
+    reffreq = pyconvert(Float64, antab.header.get("FREQ"))
 
     # Get data dimension
-    _, _, _, nspw, nch, _, _ = size(ghdu.data.data)
+    _, _, _, nspw, nch, _, _ = pyconvert(Tuple, ghdu.data.data.shape)
 
     # Check FREQSEL
     nfreqset = length(fqtab.data["FRQSEL"])
@@ -259,9 +277,9 @@ function hdulist2freq(ghdu, antab, fqtab)
     end
 
     # Get frequency settings
-    spwfreq = arraylize(numpy.float64(fqtab.data["IF FREQ"][1]))
-    chbw = arraylize(numpy.float64(fqtab.data["CH WIDTH"][1]))
-    sideband = arraylize(numpy.float64(fqtab.data["SIDEBAND"][1]))
+    spwfreq = vector(np.asarray(fqtab.data["IF FREQ"][0], dtype=np.float64).reshape([nspw]))
+    chbw = vector(np.asarray(fqtab.data["CH WIDTH"][0], dtype=np.float64).reshape([nspw]))
+    sideband = vector(np.asarray(fqtab.data["SIDEBAND"][0], dtype=np.float64).reshape([nspw]))
 
     # Axis
     s = Dim{:spw}(collect(1:nspw))
@@ -279,32 +297,37 @@ end
 """
 function hdulist2ant(antab)
     # Load numpy
-    copy!(numpy, pyimport_conda("numpy", "numpy"))
+    np = pyimport("numpy")
+
+    # define useful shortcuts
+    float64vector(x::Py) = pyconvert(Vector, np.asarray(x, dtype=np.float64))
+    int32vector(x::Py) = pyconvert(Vector, np.asarray(x, dtype=np.int32))
+    float64array(x::Py) = pyconvert(Array, np.asarray(x, dtype=np.float64))
 
     # Get the antenna infromation
     nant = length(antab.data)
 
     # Get the antenna name
-    antname = [name for name in antab.data["ANNAME"]]
-    xyz = numpy.float64(antab.data["STABXYZ"])
+    antname = [string(name) for name in antab.data["ANNAME"]]
+    xyz = float64array(antab.data["STABXYZ"])
 
     # Check polarization labels
-    pola = numpy.unique(antab.data["POLTYA"])
-    polb = numpy.unique(antab.data["POLTYB"])
+    pola = np.unique(antab.data["POLTYA"])
+    polb = np.unique(antab.data["POLTYB"])
     if length(pola) > 1
-        @throwerror ValueError "POLTYA have more than a single polarization across the array."
+        @warn "Mixed polarization feed: POLTYB have more than a single polarization across the array."
     end
     if length(polb) > 1
-        @throwerror ValueError "POLTYB have more than a single polarization across the array."
+        @warn "Mixed polarization feed: POLTYB have more than a single polarization across the array."
     end
-    pol = [pola[1], polb[1]]
-    npol = length(pol)
+    feed1 = [string(pol) for pol in antab.data["POLTYA"]]
+    feed2 = [string(pol) for pol in antab.data["POLTYB"]]
 
     # Parse Field Rotation Information
     #   See AIPS MEMO 117
     #      0: ALT-AZ, 1: Eq, 2: Orbit, 3: X-Y, 4: Naismith-R, 5: Naismith-L
     #      6: Manual
-    mntsta = numpy.int32(antab.data["MNTSTA"])
+    mntsta = int32vector(antab.data["MNTSTA"])
     fr_pa_coeff = ones(nant)
     fr_el_coeff = zeros(nant)
     fr_offset = zeros(nant)
@@ -329,7 +352,6 @@ function hdulist2ant(antab)
 
     # Set dimensions
     a = Dim{:ant}(collect(1:nant))
-    p = Dim{:feed}(collect(1:npol))
 
     # create data set
     antds = DimStack(
@@ -341,7 +363,8 @@ function hdulist2ant(antab)
         DimArray(data=fr_pa_coeff, dims=a, name=:fr_pa_coeff),
         DimArray(data=fr_el_coeff, dims=a, name=:fr_el_coeff),
         DimArray(data=fr_offset, dims=a, name=:fr_offset),
-        DimArray(data=pol, dims=p, name=:feed),
+        DimArray(data=feed1, dims=a, name=:feed1),
+        DimArray(data=feed2, dims=a, name=:feed2),
     )
 
     return antds
@@ -354,20 +377,24 @@ function hdulist2metadata(ghdu, antab)
     # Output metadata
     metadata = OrderedDict()
 
+    # Useful short cuts
+    float64(x::Py) = pyconvert(Float64, x)
+    any(x::Py) = pyconvert(Any, x)
+
     # Initialize
     for key in keys(uvdataset_metadata_default)
         metadata[key] = uvdataset_metadata_default[key]
     end
 
-    metadata[:instrument] = antab.header.get("ARRNAM")
-    metadata[:observer] = ghdu.header.get("OBSERVER")
+    metadata[:instrument] = string(antab.header.get("ARRNAM"))
+    metadata[:observer] = string(ghdu.header.get("OBSERVER"))
 
-    metadata[:source] = ghdu.header.get("OBJECT")
-    metadata[:ra] = deg2rad(ghdu.header.get("CRVAL6"))
-    metadata[:dec] = deg2rad(ghdu.header.get("CRVAL7"))
+    metadata[:source] = string(ghdu.header.get("OBJECT"))
+    metadata[:ra] = deg2rad(float64(ghdu.header.get("CRVAL6")))
+    metadata[:dec] = deg2rad(float64(ghdu.header.get("CRVAL7")))
 
-    equinox = ghdu.header.get("EQUINOX")
-    epoch = ghdu.header.get("EPOCH")
+    equinox = any(ghdu.header.get("EQUINOX"))
+    epoch = any(ghdu.header.get("EPOCH"))
     if isa(equinox, Nothing) == false
         if isa(equinox, Number)
             metadata[:equinox] = float(equinox)
