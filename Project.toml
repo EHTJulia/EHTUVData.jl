@@ -20,6 +20,7 @@ UnitfulAstro = "6112ee07-acf9-5e0f-b108-d242c714bf9f"
 
 [compat]
 DataFrames = "1"
+EHTDimensionalData = "0.1"
 EHTUtils = "0.1"
 FLoops = "0.2"
 Formatting = "0.4"
