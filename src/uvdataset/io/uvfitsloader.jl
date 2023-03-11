@@ -101,7 +101,7 @@ function hdulist2bl(ghdu; ex=ThreadedEx())
     # define useful shortcuts
     float64vector(x::Py) = pyconvert(Vector, np.asarray(x, dtype=np.float64))
     int32vector(x::Py) = pyconvert(Vector, np.asarray(x, dtype=np.int32))
-    float32array(x::Py) = pyconvert(Array, np.asarray(x, dtype=np.int32))
+    float32array(x::Py) = pyconvert(Array, np.asarray(x, dtype=np.float32))
 
     # group hdu
     ghdudata = float32array(ghdu.data.data)

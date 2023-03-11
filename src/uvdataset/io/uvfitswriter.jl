@@ -203,7 +203,7 @@ function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
     blds = uvd[:baseline]
 
     # get data size
-    nch, nspw, ndata, npol = size(blds)
+    _, nspw, _, _ = size(blds)
     nant = length(antds[:x])
 
     # Columns
@@ -229,26 +229,26 @@ function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
     #   NOSTA
     c4 = pf.Column(
         name="NOSTA", format="1J", unit=" ",
-        array=np.zeros(nant, dtype=np.int32)
+        array=int32array(collect(dims(antds)[1].val))
     )
     #   MNTSTA
     mntsta = zeros(Int32, nant)
     for i in 1:nant
         frcoeff = (antds[:fr_pa_coeff].data[i], antds[:fr_el_coeff].data[i])
-        if frcoeff == (1, 0)
+        if frcoeff == (1.0, 0.0)
             mntsta[i] = 0
-        elseif frcoeff == (0, 0)
+        elseif frcoeff == (0.0, 0.0)
             mntsta[i] = 1
-        elseif frcoeff == (1, 1)
+        elseif frcoeff == (1.0, 1.0)
             mntsta[i] = 4
-        elseif frcoeff == (1, -1)
+        elseif frcoeff == (1.0, -1.0)
             mntsta[i] = 5
         else
             @warn "Invalid Feed Rotation Type for Antenna ", i, ": ", frcoeff, ". We will use AZEL."
         end
 
         if antds[:fr_offset].data[i] != 0
-            @warn "Feed Rotation Offset Angle is not zerofor Antenna ", i, ". This will be ignored."
+            @warn "Feed Rotation Offset Angle is not zero for Antenna ", i, ". This will be ignored."
         end
     end
     c5 = pf.Column(
@@ -298,28 +298,28 @@ function uvdataset2antab(uvd::UVDataSet; ex=ThreadedEx())
 
     # Add Headers
     hdu.header.set("EXTNAME", "AIPS AN", "extension name")
-    hdu.header.set("EXTVER", Int16(1), "subarray number")
-    hdu.header.set("EXTLEVEL", Int32(1), "")
-    hdu.header.set("ARRAYX", Float32(0.0), "x coordinates of array center (meters)")
-    hdu.header.set("ARRAYY", Float32(0.0), "y coordinates of array center (meters)")
-    hdu.header.set("ARRAYZ", Float32(0.0), "z coordinates of array center (meters)")
-    hdu.header.set("GSTIA0", Float32(0.0), "GST at 0h on reference date (degrees)")
-    hdu.header.set("DEGPDY", Float32(0.0), "earth's rotation rate (degrees/day)")
-    hdu.header.set("FREQ", Float32(minimum(blds[:ν])), "reference frequency (Hz)")
+    hdu.header.set("EXTVER", np.int32(1), "subarray number")
+    hdu.header.set("EXTLEVEL", np.int32(1), "")
+    hdu.header.set("ARRAYX", np.float32(0.0), "x coordinates of array center (meters)")
+    hdu.header.set("ARRAYY", np.float32(0.0), "y coordinates of array center (meters)")
+    hdu.header.set("ARRAYZ", np.float32(0.0), "z coordinates of array center (meters)")
+    hdu.header.set("GSTIA0", np.float32(0.0), "GST at 0h on reference date (degrees)")
+    hdu.header.set("DEGPDY", np.float32(0.0), "earth's rotation rate (degrees/day)")
+    hdu.header.set("FREQ", np.float32(minimum(blds[:ν])), "reference frequency (Hz)")
     hdu.header.set("RDATE", Dates.format(mjd2datetime(minimum(blds[:mjd])), DateFormat("yyyy-mm-dd")), "reference date")
-    hdu.header.set("POLARX", Float32(0.0), "x coodinates of North Pole (arcseconds)")
-    hdu.header.set("POLARY", Float32(0.0), "y coodinates of North Pole (arcseconds)")
-    hdu.header.set("UT1UTC", Float32(0.0), "UT1 - UTC (sec)")
-    hdu.header.set("DATUTC", Float32(0.0), "time system - UTC (sec)")
+    hdu.header.set("POLARX", np.float32(0.0), "x coodinates of North Pole (arcseconds)")
+    hdu.header.set("POLARY", np.float32(0.0), "y coodinates of North Pole (arcseconds)")
+    hdu.header.set("UT1UTC", np.float32(0.0), "UT1 - UTC (sec)")
+    hdu.header.set("DATUTC", np.float32(0.0), "time system - UTC (sec)")
     hdu.header.set("TIMESYS", "UTC", "time system")
     hdu.header.set("ARRNAM", uvd.metadata[:instrument], "array name")
     hdu.header.set("XYZHAND", "RIGHT", "handness of station coordinates")
     hdu.header.set("FRAME", "????", "coordinate frame")
-    hdu.header.set("NUMORB", Int16(0), "number of orbital parameters in table")
-    hdu.header.set("NO_IF", Int16(nspw), "number IFs")
-    hdu.header.set("NOPCAL", Int16(0), "number of polarization calibration values")
+    hdu.header.set("NUMORB", np.int16(0), "number of orbital parameters in table")
+    hdu.header.set("NO_IF", np.int16(nspw), "number IFs")
+    hdu.header.set("NOPCAL", np.int16(0), "number of polarization calibration values")
     hdu.header.set("POLTYPE", "VLBI", "type of polarization calibration")
-    hdu.header.set("FREQID", Int16(1), "frequency set up number")
+    hdu.header.set("FREQID", np.int16(1), "frequency set up number")
     #
     hdu.header.set("TTYPE1", nothing, "antenna name")
     hdu.header.set("TTYPE2", nothing, "antenna station coordinates")
