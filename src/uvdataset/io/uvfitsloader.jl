@@ -21,6 +21,9 @@ function load_uvfits(filename::AbstractString; ex=ThreadedEx())::UVDataSet
     # Get the baseline-based UV data set (i.e. visibility) from GroupHDU
     blds = hdulist2bl(ghdu, ex=ex)
 
+    # Auto scan detection
+    blds = compute_scans(blds)
+
     # Get the frequency information
     blds = concat(blds, hdulist2freq(ghdu, antab, fqtab))
 

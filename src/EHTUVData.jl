@@ -24,6 +24,6 @@ include("uvdataset/abstract.jl")
 include("uvdataset/io/uvfitsutils.jl")
 include("uvdataset/io/uvfitsloader.jl")
 include("uvdataset/io/uvfitswriter.jl")
+include("uvdataset/scan.jl")
 
-# UVDiskDataSet
 end
